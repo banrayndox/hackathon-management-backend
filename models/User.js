@@ -25,6 +25,10 @@ const UserSchema = new mongoose.Schema(
       enum: ['admin', 'judge', 'participant'],
       default: 'participant',
     },
+    isLeader: {
+      type: Boolean,
+      default: false
+    },
     department: { type: String, default: '' },
     phone: { type: String, default: '' },
     bio: { type: String, default: '' },

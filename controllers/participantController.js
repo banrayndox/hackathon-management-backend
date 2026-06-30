@@ -1,5 +1,6 @@
 import Team from '../models/Team.js';
 import User from '../models/User.js';
+import Invitation from '../models/Invitation.js';
 
 // Helper: Check if a user is already in any team
 const isUserInTeam = async (userId) => {
@@ -17,8 +18,8 @@ export const getMyTeams = async (req, res) => {
   try {
     const teams = await Team.find({ members: req.user._id })
       .populate('leader', 'name email')
-      .populate('assignedJudge', 'name email')
-      .populate('members', 'name email');
+      .populate('assignedJudge', 'name email profilePicture')
+      .populate('members', 'name email profilePicture')
     res.json(teams);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -72,6 +73,17 @@ export const createTeam = async (req, res) => {
     });
 
     await team.save();
+
+    await User.updateOne(
+      { _id: req.user._id },
+      { $set: { isLeader: true } }
+    );
+    if (initialMembers.length > 0) {
+      await User.updateMany(
+        { _id: { $in: initialMembers } },
+        { $set: { isLeader: false } }
+      );
+    }
 
     // Populate and return
     const populatedTeam = await Team.findById(team._id)
@@ -256,37 +268,65 @@ export const leaveTeam = async (req, res) => {
       return res.status(404).json({ message: 'Team not found' });
     }
 
-    // Check if user is a member
     if (!team.members.includes(req.user._id)) {
       return res.status(400).json({ message: 'You are not a member of this team' });
     }
 
-    // If user is leader, transfer leadership or delete if alone
+    // If user is the leader
     if (team.leader.toString() === req.user._id.toString()) {
       // Remove leader from members
       team.members = team.members.filter(id => id.toString() !== req.user._id.toString());
+
+      // Case 1: No members left → delete team, set old leader's isLeader false
       if (team.members.length === 0) {
-        // No members left, delete the team
         await team.deleteOne();
+        await User.updateOne(
+          { _id: req.user._id },
+          { $set: { isLeader: false } }
+        );
         return res.json({ message: 'Team deleted as you were the only member' });
-      } else {
-        // Transfer leadership to first remaining member
-        team.leader = team.members[0];
-        await team.save();
-        const populated = await Team.findById(team._id)
-          .populate('leader', 'name email')
-          .populate('members', 'name email');
-        return res.json({ message: 'You left the team. Leadership transferred to another member.', team: populated });
       }
-    } else {
-      // Non-leader leaves: just remove from members
-      team.members = team.members.filter(id => id.toString() !== req.user._id.toString());
+
+      // Case 2: Transfer leadership to first remaining member
+      const newLeaderId = team.members[0];
+      team.leader = newLeaderId;
       await team.save();
+
+      // Update isLeader flags
+      await User.updateOne(
+        { _id: req.user._id },
+        { $set: { isLeader: false } }
+      );
+      await User.updateOne(
+        { _id: newLeaderId },
+        { $set: { isLeader: true } }
+      );
+
       const populated = await Team.findById(team._id)
         .populate('leader', 'name email')
         .populate('members', 'name email');
-      return res.json({ message: 'You left the team successfully', team: populated });
+
+      return res.json({
+        message: 'You left the team. Leadership transferred to another member.',
+        team: populated
+      });
     }
+
+    // Non-leader leaves
+    team.members = team.members.filter(id => id.toString() !== req.user._id.toString());
+    await team.save();
+
+    // Ensure the leaving member's isLeader is false (should already be)
+    await User.updateOne(
+      { _id: req.user._id },
+      { $set: { isLeader: false } }
+    );
+
+    const populated = await Team.findById(team._id)
+      .populate('leader', 'name email')
+      .populate('members', 'name email');
+
+    return res.json({ message: 'You left the team successfully', team: populated });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -319,6 +359,182 @@ export const updateTeamPayment = async (req, res) => {
       .populate('members', 'name email');
 
     res.json(populated);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// ---------- Get Available Users (Participants not in any team) ----------
+export const getAvailableUsers = async (req, res) => {
+  try {
+    const teams = await Team.find({}, 'members');
+    const memberIds = teams.reduce((acc, team) => acc.concat(team.members), []);
+
+    const availableUsers = await User.find({
+      role: 'participant',
+      _id: { $nin: [...memberIds, req.user._id] }
+    }).select('name email');
+
+    res.json(availableUsers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ---------- Send Team Invitation (Only leader) ----------
+export const sendInvitation = async (req, res) => {
+  try {
+    const { inviteeId } = req.body;
+    if (!inviteeId) {
+      return res.status(400).json({ message: 'Invitee ID is required' });
+    }
+
+    const team = await Team.findOne({ leader: req.user._id });
+    if (!team) {
+      return res.status(400).json({ message: 'Only team leaders can send invitations' });
+    }
+
+    const invitee = await User.findById(inviteeId);
+    if (!invitee || invitee.role !== 'participant') {
+      return res.status(404).json({ message: 'Invitee not found or is not a participant' });
+    }
+
+    if (await isUserInTeam(inviteeId)) {
+      return res.status(400).json({ message: 'User is already in a team' });
+    }
+
+    const existingInvite = await Invitation.findOne({
+      team: team._id,
+      invitee: inviteeId,
+      status: 'pending'
+    });
+    if (existingInvite) {
+      return res.status(400).json({ message: 'Invitation is already pending' });
+    }
+
+    const invitation = new Invitation({
+      team: team._id,
+      sender: req.user._id,
+      invitee: inviteeId
+    });
+
+    await invitation.save();
+    res.status(201).json(invitation);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// ---------- Get invitations received by current user ----------
+export const getInvitations = async (req, res) => {
+  try {
+    const invitations = await Invitation.find({
+      invitee: req.user._id,
+      status: 'pending'
+    })
+    .populate('team', 'name code')
+    .populate('sender', 'name email');
+    res.json(invitations);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ---------- Accept invitation ----------
+export const acceptInvitation = async (req, res) => {
+  try {
+    const { invitationId } = req.params;
+    const invitation = await Invitation.findById(invitationId);
+    if (!invitation || invitation.invitee.toString() !== req.user._id.toString()) {
+      return res.status(404).json({ message: 'Invitation not found' });
+    }
+
+    if (invitation.status !== 'pending') {
+      return res.status(400).json({ message: 'Invitation is no longer pending' });
+    }
+
+    if (await isUserInTeam(req.user._id)) {
+      await Invitation.updateMany({ invitee: req.user._id, status: 'pending' }, { status: 'rejected' });
+      return res.status(400).json({ message: 'You are already in a team' });
+    }
+
+    const team = await Team.findById(invitation.team);
+    if (!team) {
+      invitation.status = 'rejected';
+      await invitation.save();
+      return res.status(404).json({ message: 'Team no longer exists' });
+    }
+
+    // Add user to team
+    team.members.push(req.user._id);
+    await team.save();
+
+    // Mark invitation accepted
+    invitation.status = 'accepted';
+    await invitation.save();
+
+    // Reject other invitations
+    await Invitation.updateMany(
+      { invitee: req.user._id, status: 'pending', _id: { $ne: invitationId } },
+      { status: 'rejected' }
+    );
+
+    res.json({ message: 'Invitation accepted successfully', team });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// ---------- Reject invitation ----------
+export const rejectInvitation = async (req, res) => {
+  try {
+    const { invitationId } = req.params;
+    const invitation = await Invitation.findById(invitationId);
+    if (!invitation || invitation.invitee.toString() !== req.user._id.toString()) {
+      return res.status(404).json({ message: 'Invitation not found' });
+    }
+
+    invitation.status = 'rejected';
+    await invitation.save();
+    res.json({ message: 'Invitation rejected successfully' });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// ---------- Submit Project (Only leader) ----------
+export const submitProject = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { projectName, projectDescription, techStack, githubLink, driveLink, demoLink } = req.body;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    if (team.leader.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Only the team leader can submit the project' });
+    }
+
+    team.projectName = projectName || '';
+    team.projectDescription = projectDescription || '';
+    
+    if (techStack !== undefined) {
+      team.techStack = Array.isArray(techStack) 
+        ? techStack 
+        : typeof techStack === 'string' 
+          ? techStack.split(',').map(s => s.trim()).filter(Boolean)
+          : [];
+    }
+    
+    team.githubLink = githubLink || '';
+    team.driveLink = driveLink || '';
+    team.demoLink = demoLink || '';
+    team.submitted = true;
+
+    await team.save();
+    res.json(team);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }

@@ -51,6 +51,35 @@ const TeamSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    projectName: {
+      type: String,
+      default: '',
+    },
+    projectDescription: {
+      type: String,
+      default: '',
+    },
+    techStack: [
+      {
+        type: String,
+      },
+    ],
+    githubLink: {
+      type: String,
+      default: '',
+    },
+    driveLink: {
+      type: String,
+      default: '',
+    },
+    demoLink: {
+      type: String,
+      default: '',
+    },
+    submitted: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

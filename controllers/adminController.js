@@ -1,6 +1,6 @@
 import User from '../models/User.js';
 import Team from '../models/Team.js';
-
+import Invitation from '../models/Invitation.js';
 // ---------- User Management ----------
 export const getAllUsers = async (req, res) => {
   try {
@@ -33,10 +33,73 @@ export const updateUserRole = async (req, res) => {
 export const deleteUser = async (req, res) => {
   try {
     const { userId } = req.params;
-    const user = await User.findByIdAndDelete(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // 1. Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // 2. Handle judge assignments: unassign from any teams where this user is the judge
+    if (user.role === 'judge') {
+      await Team.updateMany(
+        { assignedJudge: userId },
+        { $set: { assignedJudge: null } }
+      );
+    }
+
+    // 3. Handle teams where the user is the leader
+    const leaderTeams = await Team.find({ leader: userId });
+    for (const team of leaderTeams) {
+      // Remove leader from members list
+      team.members = team.members.filter(
+        (memberId) => memberId.toString() !== userId.toString()
+      );
+
+      if (team.members.length === 0) {
+        // No members left → delete the team
+        await team.deleteOne();
+      } else {
+        // Transfer leadership to the first remaining member
+        const newLeaderId = team.members[0];
+        team.leader = newLeaderId;
+        await team.save();
+
+        // Update isLeader flags
+        await User.updateOne(
+          { _id: newLeaderId },
+          { $set: { isLeader: true } }
+        );
+        // (The deleted user's isLeader is irrelevant; we'll remove the user)
+      }
+    }
+
+    // 4. Handle teams where the user is a non‑leader member
+    const memberTeams = await Team.find({ members: userId });
+    for (const team of memberTeams) {
+      // Remove user from members list
+      team.members = team.members.filter(
+        (memberId) => memberId.toString() !== userId.toString()
+      );
+      // If the team becomes empty (shouldn't happen if leader handled above, but just in case)
+      if (team.members.length === 0) {
+        await team.deleteOne();
+      } else {
+        await team.save();
+      }
+    }
+
+    // 5. Delete all invitations involving this user (sent or received)
+    await Invitation.deleteMany({
+      $or: [{ sender: userId }, { invitee: userId }]
+    });
+
+    // 6. Finally delete the user document
+    await User.findByIdAndDelete(userId);
+
     res.json({ message: 'User deleted successfully' });
   } catch (error) {
+    console.error('Error deleting user:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -124,5 +187,37 @@ export const updateTeamScores = async (req, res) => {
     res.json(team);
   } catch (error) {
     res.status(400).json({ message: error.message });
+  }
+};
+
+
+
+export const updateJudgeProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { expertise, industry } = req.body;
+
+    const updatedJudge = await User.findByIdAndUpdate(
+      id,
+      { $set: { expertise, industry } },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedJudge) return res.status(404).json({ message: "Judge not found" });
+    res.status(200).json(updatedJudge);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ২. জাজের অ্যাসাইন করা টিমগুলোর লিস্ট নিয়ে আসার ফাংশন
+export const getJudgeAssignedTeams = async (req, res) => {
+  try {
+    const { id } = req.params;
+    // ফিল্ড নাম ঠিক করুন: 'assignedJudge' ব্যবহার করুন, 'judge' নয়
+    const teams = await Team.find({ assignedJudge: id }).select('name projectTitle');
+    res.status(200).json(teams);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
   }
 };

@@ -35,4 +35,22 @@ router.delete('/teams/:teamId', participantController.deleteTeam);
 // Update payment (only leader)
 router.put('/teams/:teamId/payment', participantController.updateTeamPayment);
 
+// Available users not in any team
+router.get('/available-users', participantController.getAvailableUsers);
+
+// Get received invitations
+router.get('/invitations', participantController.getInvitations);
+
+// Send team invitation
+router.post('/teams/invite', participantController.sendInvitation);
+
+// Accept invitation
+router.post('/invitations/:invitationId/accept', participantController.acceptInvitation);
+
+// Reject invitation
+router.post('/invitations/:invitationId/reject', participantController.rejectInvitation);
+
+// Submit project details
+router.put('/teams/:teamId/submit', participantController.submitProject);
+
 export default router;

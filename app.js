@@ -28,7 +28,7 @@ app.use(cors({
     }
     return callback(null, true);
   },
-  credentials: true, // যদি কুকি বা অথ হেডার পাস করতে চান
+  credentials: true, 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -46,13 +46,13 @@ app.get('/', (req, res) => {
   res.json({ message: 'API is running' });
 });
 
-// MongoDB connection
+
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB connected'))
-  .catch((err) => console.error('❌ MongoDB connection error:', err));
+  .then(() => console.log(' MongoDB connected'))
+  .catch((err) => console.error('MongoDB connection error:', err));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(` Server running on port ${PORT}`);
 });
