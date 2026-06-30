@@ -230,9 +230,11 @@ export const updateJudgeProfile = async (req, res) => {
 // ২. জাজের অ্যাসাইন করা টিমগুলোর লিস্ট নিয়ে আসার ফাংশন
 export const getJudgeAssignedTeams = async (req, res) => {
   try {
+   
     const { id } = req.params;
     // ফিল্ড নাম ঠিক করুন: 'assignedJudge' ব্যবহার করুন, 'judge' নয়
-    const teams = await Team.find({ assignedJudge: id }).select('name projectTitle');
+    const teams = await Team.find({ assignedJudge: id }).select('name projectName submitted');
+    
     res.status(200).json(teams);
   } catch (error) {
     res.status(500).json({ message: "Server error" });
