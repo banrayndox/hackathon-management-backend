@@ -131,16 +131,33 @@ export const assignJudge = async (req, res) => {
   try {
     const { teamId } = req.params;
     const { judgeId } = req.body;
-    const judge = await User.findOne({ _id: judgeId, role: 'judge' });
-    if (!judge) {
-      return res.status(400).json({ message: 'Invalid judge ID or not a judge' });
+
+    // ১. চেক করা হচ্ছে জাজ আনঅ্যাসাইন (Unassign) করতে হবে কিনা
+    const isUnassign = !judgeId || judgeId === null || judgeId.startsWith("Assign Judge");
+
+    let updateData = {};
+
+    if (isUnassign) {
+      // জাজ রিমুভ করার জন্য ফিল্ডটিকে null সেট করব অথবা $unset ব্যবহার করব
+      updateData = { assignedJudge: null }; 
+    } else {
+      // ২. যদি নতুন জাজ অ্যাসাইন করতে হয়, তবে আগে চেক করব সেই জাজ ভ্যালিড কিনা
+      const judge = await User.findOne({ _id: judgeId, role: 'judge' });
+      if (!judge) {
+        return res.status(400).json({ message: 'Invalid judge ID or not a judge' });
+      }
+      updateData = { assignedJudge: judgeId };
     }
+
+    // ৩. টিম আপডেট করা হচ্ছে
     const team = await Team.findByIdAndUpdate(
       teamId,
-      { assignedJudge: judgeId },
+      updateData,
       { new: true }
     ).populate('assignedJudge', 'name email');
+
     if (!team) return res.status(404).json({ message: 'Team not found' });
+
     res.json(team);
   } catch (error) {
     res.status(400).json({ message: error.message });

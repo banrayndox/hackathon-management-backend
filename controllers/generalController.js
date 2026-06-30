@@ -18,9 +18,9 @@ export const getAllTeams = async (req, res) => {
 export const getTeamById = async (req, res) => {
   try {
     const team = await Team.findById(req.params.teamId)
-      .populate('leader', 'name email department phone bio')
-      .populate('members', 'name email department phone bio')
-      .populate('assignedJudge', 'name email department phone bio expertise industry designation');
+      .populate('leader', 'name email department phone bio profilePicture')
+      .populate('members', 'name email department phone bio profilePicture')
+      .populate('assignedJudge', 'name email department phone bio expertise industry designation profilePicture');
     
     if (!team) {
       return res.status(404).json({ message: 'Team not found' });
