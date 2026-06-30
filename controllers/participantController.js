@@ -129,18 +129,26 @@ export const joinTeamByCode = async (req, res) => {
 };
 
 // ---------- Join a team (by team ID) ----------
+// ---------- Join a team (by team code) ----------
 export const joinTeam = async (req, res) => {
   try {
-    const { teamId } = req.params;
+    // teamId এর বদলে code নেওয়া হলো
+    const { code } = req.params; 
 
     // Check if user is already in a team
     if (await isUserInTeam(req.user._id)) {
       return res.status(400).json({ message: 'You are already in a team' });
     }
 
-    const team = await Team.findById(teamId);
+    // findById এর বদলে findOne দিয়ে code ম্যাচ করা হলো
+    const team = await Team.findOne({ code: code }); 
     if (!team) {
-      return res.status(404).json({ message: 'Team not found' });
+      return res.status(404).json({ message: 'Invalid team code or team not found' });
+    }
+
+    // Check if user is already a member of this team (Optional but safe)
+    if (team.members.includes(req.user._id)) {
+      return res.status(400).json({ message: 'You are already a member of this team' });
     }
 
     // Add user to members
